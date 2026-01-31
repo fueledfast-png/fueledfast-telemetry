@@ -9,17 +9,15 @@ from utils.analysis import (
     match_corners
 )
 
-from utils.ai_engineer import generate_ai_report
-
 # -------------------------------------------------
 # PAGE SETUP
 # -------------------------------------------------
 st.set_page_config(page_title="FueledFast Telemetry", layout="wide")
 
 st.sidebar.title("🔥 FueledFast Telemetry")
-st.sidebar.caption("Race Engineering Analysis")
+st.sidebar.caption("Telemetry Analysis MVP")
 
-st.title("🏎️ Telemetry Comparison")
+st.title("🏎️ Telemetry Comparison Tool")
 st.markdown("---")
 
 # -------------------------------------------------
@@ -32,7 +30,7 @@ files = st.file_uploader(
 )
 
 if not files or len(files) < 2:
-    st.info("Upload at least two laps.")
+    st.info("Upload at least two lap files.")
     st.stop()
 
 laps = {f.name: pd.read_csv(f) for f in files}
@@ -45,7 +43,10 @@ col1, col2 = st.columns(2)
 with col1:
     ref_name = st.selectbox("Reference Lap", names)
 with col2:
-    cmp_name = st.selectbox("Comparison Lap", [n for n in names if n != ref_name])
+    cmp_name = st.selectbox(
+        "Comparison Lap",
+        [n for n in names if n != ref_name]
+    )
 
 ref, cmp = align_laps(laps[ref_name], laps[cmp_name])
 ref = compute_delta(ref, cmp)
@@ -60,9 +61,9 @@ st.line_chart(ref.set_index("distance")["delta_time"])
 # SECTOR DELTAS
 # -------------------------------------------------
 st.subheader("🧩 Sector Deltas")
-sectors = st.slider("Number of sectors", 2, 6, 3)
+sector_count = st.slider("Number of sectors", 2, 6, 3)
 
-sector_df = compute_sector_deltas(ref, cmp, sectors)
+sector_df = compute_sector_deltas(ref, cmp, sector_count)
 st.dataframe(sector_df, use_container_width=True)
 
 # -------------------------------------------------
@@ -86,41 +87,12 @@ else:
     st.warning("No corners detected with current settings.")
 
 # -------------------------------------------------
-# LAP SUMMARY
+# SUMMARY
 # -------------------------------------------------
 st.markdown("---")
 st.subheader("📊 Lap Summary")
 
-lap_summary = {
-    "Average Delta (s)": round(ref["delta_time"].mean(), 4),
-    "Maximum Time Loss (s)": round(ref["delta_time"].max(), 4),
-    "Total Distance (m)": round(ref["distance"].max(), 1),
-    "Corners Detected": len(ref_corners),
-}
-
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Avg Delta (s)", lap_summary["Average Delta (s)"])
-c2.metric("Max Loss (s)", lap_summary["Maximum Time Loss (s)"])
-c3.metric("Distance (m)", lap_summary["Total Distance (m)"])
-c4.metric("Corners", lap_summary["Corners Detected"])
-
-# -------------------------------------------------
-# AI ENGINEER COACHING
-# -------------------------------------------------
-st.markdown("---")
-st.subheader("🧠 AI Race Engineer Coaching")
-
-enable_ai = st.toggle("Enable AI Engineer", value=True)
-
-if enable_ai:
-    with st.spinner("AI engineer reviewing telemetry..."):
-        ai_report = generate_ai_report(
-            lap_summary=lap_summary,
-            sector_table=sector_df.to_string(index=False),
-            corner_table=corner_df.to_string(index=False) if not ref_corners.empty else "No corners detected"
-        )
-
-    st.markdown(ai_report)
-
-else:
-    st.info("AI coaching disabled.")
+c1, c2, c3 = st.columns(3)
+c1.metric("Avg Delta (s)", round(ref["delta_time"].mean(), 4))
+c2.metric("Max Loss (s)", round(ref["delta_time"].max(), 4))
+c3.metric("Corners", len(ref_corners))
