@@ -88,12 +88,15 @@ with c2:
 # DELTA GRAPH
 # ------------------------------
 st.markdown("---")
-st.subheader("📉 Time Delta")
-st.line_chart(processed["delta_time"])
+st.subheader("📉 Time Delta vs Distance")
+st.line_chart(
+    processed.set_index("distance")["delta_time"]
+)
+
 
 st.write(f"**Average Delta:** {insights['avg_delta']} s")
 st.write(f"**Max Time Lost:** {insights['max_loss']} s")
-st.write(f"**Worst Section Index:** {insights['worst_index']}")
+st.write(f"**Distance of Max Loss:** {insights['distance_of_max_loss']} m")
 
 # ------------------------------
 # TELEMETRY CHANNELS
