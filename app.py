@@ -4,26 +4,27 @@ import pandas as pd
 from utils.analysis import (
     align_laps,
     compute_delta,
-    interpolate_channel
+    interpolate_channel,
+    compute_sector_deltas
 )
 
-# -----------------------------
+# -------------------------------------------------
 # PAGE SETUP
-# -----------------------------
+# -------------------------------------------------
 st.set_page_config(
     page_title="FueledFast Telemetry",
     layout="wide"
 )
 
 st.sidebar.title("🔥 FueledFast Telemetry")
-st.sidebar.caption("Distance-Based Lap Analysis")
+st.sidebar.caption("Professional Lap Comparison")
 
 st.title("🏎️ Telemetry Comparison Dashboard")
 st.markdown("---")
 
-# -----------------------------
+# -------------------------------------------------
 # FILE UPLOAD
-# -----------------------------
+# -------------------------------------------------
 files = st.file_uploader(
     "Upload telemetry CSV files",
     type=["csv"],
@@ -36,14 +37,13 @@ if not files or len(files) < 2:
 
 laps = {}
 for f in files:
-    df = pd.read_csv(f)
-    laps[f.name] = df
+    laps[f.name] = pd.read_csv(f)
 
 lap_names = list(laps.keys())
 
-# -----------------------------
+# -------------------------------------------------
 # LAP SELECTION
-# -----------------------------
+# -------------------------------------------------
 col1, col2 = st.columns(2)
 
 with col1:
@@ -58,23 +58,23 @@ with col2:
 ref_lap = laps[ref_name]
 cmp_lap = laps[cmp_name]
 
-# -----------------------------
+# -------------------------------------------------
 # ALIGN + DELTA
-# -----------------------------
+# -------------------------------------------------
 ref_aligned, cmp_aligned = align_laps(ref_lap, cmp_lap)
 ref_processed = compute_delta(ref_aligned, cmp_aligned)
 
-# -----------------------------
+# -------------------------------------------------
 # DELTA CHART
-# -----------------------------
+# -------------------------------------------------
 st.subheader("📉 Delta Time vs Distance")
+st.line_chart(
+    ref_processed.set_index("distance")["delta_time"]
+)
 
-delta_df = ref_processed.set_index("distance")["delta_time"]
-st.line_chart(delta_df)
-
-# -----------------------------
+# -------------------------------------------------
 # SPEED OVERLAY
-# -----------------------------
+# -------------------------------------------------
 st.subheader("📈 Speed Overlay")
 
 cmp_speed = interpolate_channel(ref_processed, cmp_aligned, "speed")
@@ -86,9 +86,9 @@ speed_df = pd.DataFrame({
 
 st.line_chart(speed_df)
 
-# -----------------------------
+# -------------------------------------------------
 # THROTTLE / BRAKE OVERLAYS
-# -----------------------------
+# -------------------------------------------------
 st.subheader("🦶 Throttle & Brake Overlays")
 
 tabs = st.tabs(["Throttle", "Brake"])
@@ -108,9 +108,33 @@ for tab, channel in zip(tabs, ["throttle", "brake"]):
 
         st.line_chart(overlay_df)
 
-# -----------------------------
+# -------------------------------------------------
+# SECTOR DELTAS
+# -------------------------------------------------
+st.markdown("---")
+st.subheader("🧩 Sector Delta Analysis")
+
+sector_count = st.slider(
+    "Number of Sectors",
+    min_value=2,
+    max_value=6,
+    value=3
+)
+
+sector_df = compute_sector_deltas(
+    ref_processed,
+    cmp_aligned,
+    sectors=sector_count
+)
+
+st.dataframe(
+    sector_df,
+    use_container_width=True
+)
+
+# -------------------------------------------------
 # SUMMARY METRICS
-# -----------------------------
+# -------------------------------------------------
 st.markdown("---")
 st.subheader("📊 Lap Summary")
 
