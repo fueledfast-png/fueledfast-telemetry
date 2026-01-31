@@ -1,49 +1,42 @@
 import pandas as pd
 import numpy as np
 
-# -------------------------------------------------
-# DISTANCE HANDLING
-# -------------------------------------------------
-def ensure_distance(lap):
-    """
-    Ensures lap has a distance column.
-    If missing, calculate from speed & time.
-    """
+
+def ensure_distance(lap: pd.DataFrame) -> pd.DataFrame:
+    lap = lap.copy()
+
+    # If distance already exists, trust it
     if "distance" in lap.columns:
         return lap
 
-    lap = lap.copy()
-
+    # Safety fallback
     if "speed" not in lap.columns or "time" not in lap.columns:
         lap["distance"] = np.arange(len(lap))
         return lap
 
-    speed = lap["speed"].copy()
-
-    # detect km/h → m/s
+    # Convert km/h to m/s if needed
+    speed = lap["speed"]
     if speed.mean() > 40:
         speed = speed / 3.6
 
-    time = lap["time"]
-    dt = time.diff().fillna(0.05)
-
+    dt = lap["time"].diff().fillna(0.05)
     lap["distance"] = (speed * dt).cumsum()
+
     return lap
 
 
-# -------------------------------------------------
-# DISTANCE-BASED LAP COMPARISON
-# -------------------------------------------------
-def analyze_laps(reference_lap, compare_lap):
-    ref = ensure_distance(reference_lap)
-    cmp = ensure_distance(compare_lap)
+def align_laps(ref: pd.DataFrame, cmp: pd.DataFrame):
+    ref = ensure_distance(ref)
+    cmp = ensure_distance(cmp)
 
     max_dist = min(ref["distance"].max(), cmp["distance"].max())
+    ref = ref[ref["distance"] <= max_dist].reset_index(drop=True)
+    cmp = cmp[cmp["distance"] <= max_dist].reset_index(drop=True)
 
-    ref = ref[ref["distance"] <= max_dist]
-    cmp = cmp[cmp["distance"] <= max_dist]
+    return ref, cmp
 
-    # interpolate time vs distance
+
+def compute_delta(ref: pd.DataFrame, cmp: pd.DataFrame) -> pd.DataFrame:
     cmp_time_interp = np.interp(
         ref["distance"],
         cmp["distance"],
@@ -52,33 +45,15 @@ def analyze_laps(reference_lap, compare_lap):
 
     ref = ref.copy()
     ref["delta_time"] = ref["time"] - cmp_time_interp
-
-    insights = {
-        "avg_delta": round(ref["delta_time"].mean(), 4),
-        "max_loss": round(ref["delta_time"].max(), 4),
-        "distance_of_max_loss": round(
-            ref.loc[ref["delta_time"].idxmax(), "distance"], 2
-        )
-    }
-
-    return ref, insights
+    return ref
 
 
-# -------------------------------------------------
-# DRIVING STATS
-# -------------------------------------------------
-def driving_stats(lap):
-    stats = {}
+def interpolate_channel(ref: pd.DataFrame, cmp: pd.DataFrame, channel: str):
+    if channel not in cmp.columns:
+        return None
 
-    if "speed" in lap.columns:
-        stats["Avg Speed"] = round(lap["speed"].mean(), 2)
-        stats["Max Speed"] = round(lap["speed"].max(), 2)
-        stats["Min Speed"] = round(lap["speed"].min(), 2)
-
-    if "throttle" in lap.columns:
-        stats["Avg Throttle"] = round(lap["throttle"].mean(), 3)
-
-    if "brake" in lap.columns:
-        stats["Avg Brake"] = round(lap["brake"].mean(), 3)
-
-    return stats
+    return np.interp(
+        ref["distance"],
+        cmp["distance"],
+        cmp[channel]
+    )
