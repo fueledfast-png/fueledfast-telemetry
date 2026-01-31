@@ -1,121 +1,135 @@
 import streamlit as st
 import pandas as pd
-from utils.analysis import analyze_laps, driving_stats
 
-# ------------------------------
-# PAGE CONFIG
-# ------------------------------
+from utils.analysis import (
+    align_laps,
+    compute_delta,
+    interpolate_channel
+)
+
+# -----------------------------
+# PAGE SETUP
+# -----------------------------
 st.set_page_config(
     page_title="FueledFast Telemetry",
-    page_icon="🏎️",
     layout="wide"
 )
 
-# ------------------------------
-# SIDEBAR
-# ------------------------------
-st.sidebar.title("🔥 FueledFast – AI Race Engineering")
-st.sidebar.write("Multi-Lap Telemetry MVP")
-st.sidebar.write("Mode: Analysis Core")
-st.sidebar.markdown("---")
-st.sidebar.success("✅ MVP Active")
+st.sidebar.title("🔥 FueledFast Telemetry")
+st.sidebar.caption("Distance-Based Lap Analysis")
 
-# ------------------------------
-# MAIN TITLE
-# ------------------------------
-st.title("🏎️ FueledFast Multi-Lap Telemetry")
-st.subheader("Upload multiple laps and compare them like a race engineer")
+st.title("🏎️ Telemetry Comparison Dashboard")
 st.markdown("---")
 
-# ------------------------------
-# MULTI-LAP UPLOAD
-# ------------------------------
-uploaded_files = st.file_uploader(
-    "Upload lap CSV files",
+# -----------------------------
+# FILE UPLOAD
+# -----------------------------
+files = st.file_uploader(
+    "Upload telemetry CSV files",
     type=["csv"],
     accept_multiple_files=True
 )
 
-if not uploaded_files or len(uploaded_files) < 2:
-    st.info("Upload **at least two laps** to begin analysis.")
+if not files or len(files) < 2:
+    st.info("Upload at least 2 laps to begin.")
     st.stop()
 
-# ------------------------------
-# LOAD LAPS
-# ------------------------------
-laps = {file.name: pd.read_csv(file) for file in uploaded_files}
+laps = {}
+for f in files:
+    df = pd.read_csv(f)
+    laps[f.name] = df
+
 lap_names = list(laps.keys())
 
-# ------------------------------
+# -----------------------------
 # LAP SELECTION
-# ------------------------------
-st.markdown("## 🔁 Lap Comparison")
-
+# -----------------------------
 col1, col2 = st.columns(2)
+
 with col1:
-    ref_name = st.selectbox("Reference Lap", lap_names, index=0)
+    ref_name = st.selectbox("Reference Lap (Gold)", lap_names)
+
 with col2:
-    cmp_name = st.selectbox("Comparison Lap", lap_names, index=1)
+    cmp_name = st.selectbox(
+        "Comparison Lap",
+        [n for n in lap_names if n != ref_name]
+    )
 
 ref_lap = laps[ref_name]
 cmp_lap = laps[cmp_name]
 
-st.success(f"Comparing **{ref_name}** vs **{cmp_name}**")
+# -----------------------------
+# ALIGN + DELTA
+# -----------------------------
+ref_aligned, cmp_aligned = align_laps(ref_lap, cmp_lap)
+ref_processed = compute_delta(ref_aligned, cmp_aligned)
 
-# ------------------------------
-# ANALYSIS
-# ------------------------------
-processed, insights = analyze_laps(ref_lap, cmp_lap)
-ref_stats = driving_stats(ref_lap)
-cmp_stats = driving_stats(cmp_lap)
+# -----------------------------
+# DELTA CHART
+# -----------------------------
+st.subheader("📉 Delta Time vs Distance")
 
-# ------------------------------
-# RESULTS — STATS
-# ------------------------------
+delta_df = ref_processed.set_index("distance")["delta_time"]
+st.line_chart(delta_df)
+
+# -----------------------------
+# SPEED OVERLAY
+# -----------------------------
+st.subheader("📈 Speed Overlay")
+
+cmp_speed = interpolate_channel(ref_processed, cmp_aligned, "speed")
+
+speed_df = pd.DataFrame({
+    ref_name: ref_processed["speed"],
+    cmp_name: cmp_speed
+}, index=ref_processed["distance"])
+
+st.line_chart(speed_df)
+
+# -----------------------------
+# THROTTLE / BRAKE OVERLAYS
+# -----------------------------
+st.subheader("🦶 Throttle & Brake Overlays")
+
+tabs = st.tabs(["Throttle", "Brake"])
+
+for tab, channel in zip(tabs, ["throttle", "brake"]):
+    with tab:
+        cmp_channel = interpolate_channel(ref_processed, cmp_aligned, channel)
+
+        if channel not in ref_processed.columns or cmp_channel is None:
+            st.warning(f"{channel.capitalize()} data not available.")
+            continue
+
+        overlay_df = pd.DataFrame({
+            ref_name: ref_processed[channel],
+            cmp_name: cmp_channel
+        }, index=ref_processed["distance"])
+
+        st.line_chart(overlay_df)
+
+# -----------------------------
+# SUMMARY METRICS
+# -----------------------------
 st.markdown("---")
-st.subheader("📊 Driving Behavior Analysis")
+st.subheader("📊 Lap Summary")
 
-c1, c2 = st.columns(2)
-with c1:
-    st.markdown(f"### {ref_name}")
-    st.json(ref_stats)
+col1, col2, col3 = st.columns(3)
 
-with c2:
-    st.markdown(f"### {cmp_name}")
-    st.json(cmp_stats)
+with col1:
+    st.metric(
+        "Average Delta (s)",
+        round(ref_processed["delta_time"].mean(), 4)
+    )
 
-# ------------------------------
-# DELTA GRAPH
-# ------------------------------
-st.markdown("---")
-st.subheader("📉 Time Delta vs Distance")
-st.line_chart(
-    processed.set_index("distance")["delta_time"]
-)
+with col2:
+    st.metric(
+        "Max Time Loss (s)",
+        round(ref_processed["delta_time"].max(), 4)
+    )
 
-
-st.write(f"**Average Delta:** {insights['avg_delta']} s")
-st.write(f"**Max Time Lost:** {insights['max_loss']} s")
-st.write(f"**Distance of Max Loss:** {insights['distance_of_max_loss']} m")
-
-# ------------------------------
-# TELEMETRY CHANNELS
-# ------------------------------
-st.markdown("---")
-st.subheader("📈 Telemetry Channels")
-
-for channel in ["speed", "throttle", "brake"]:
-    if channel in ref_lap.columns:
-        st.write(f"### {channel.capitalize()}")
-        st.line_chart(
-            pd.DataFrame({
-                "Reference": ref_lap[channel],
-                "Comparison": cmp_lap[channel]
-            })
-        )
-
-# ------------------------------
-# FOOTER
-# ------------------------------
-st.markdown("---")
-st.caption("FueledFast Telemetry • MVP Core • © Creao AI")
+with col3:
+    st.metric(
+        "Lap Distance (m)",
+        round(ref_processed["distance"].max(), 1)
+    )
