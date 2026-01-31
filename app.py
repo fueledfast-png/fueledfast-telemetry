@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import matplotlib.pyplot as plt
 
 from utils.analysis import (
     align_laps,
@@ -85,6 +86,31 @@ if not ref_corners.empty and not cmp_corners.empty:
     st.dataframe(corner_df, use_container_width=True)
 else:
     st.warning("No corners detected with current settings.")
+    corner_df = pd.DataFrame()  # empty fallback
+
+# -------------------------------------------------
+# CORNER DELTA PLOTS
+# -------------------------------------------------
+if not corner_df.empty:
+    st.subheader("📊 Corner Delta Plot")
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+    x = corner_df["Corner"]
+
+    # Plot reference vs comparison
+    ax.plot(x, corner_df["Ref Time"], marker='o', label="Ref Corner Time")
+    ax.plot(x, corner_df["Cmp Time"], marker='o', label="Cmp Corner Time")
+
+    # Plot delta
+    ax.bar(x, corner_df["Delta (s)"], alpha=0.3, color='red', label="Delta (s)")
+
+    ax.set_xlabel("Corner Number")
+    ax.set_ylabel("Time (s)")
+    ax.set_title("Corner Times & Delta Comparison")
+    ax.legend()
+    ax.grid(True)
+
+    st.pyplot(fig)
 
 # -------------------------------------------------
 # SUMMARY
