@@ -4,11 +4,12 @@ import pandas as pd
 from utils.analysis import (
     align_laps,
     compute_delta,
-    interpolate_channel,
     compute_sector_deltas,
     detect_corners,
     match_corners
 )
+
+from utils.ai_engineer import generate_ai_report
 
 # -------------------------------------------------
 # PAGE SETUP
@@ -59,11 +60,10 @@ st.line_chart(ref.set_index("distance")["delta_time"])
 # SECTOR DELTAS
 # -------------------------------------------------
 st.subheader("🧩 Sector Deltas")
-sectors = st.slider("Sectors", 2, 6, 3)
-st.dataframe(
-    compute_sector_deltas(ref, cmp, sectors),
-    use_container_width=True
-)
+sectors = st.slider("Number of sectors", 2, 6, 3)
+
+sector_df = compute_sector_deltas(ref, cmp, sectors)
+st.dataframe(sector_df, use_container_width=True)
 
 # -------------------------------------------------
 # CORNER ANALYSIS
@@ -79,19 +79,48 @@ with st.expander("Corner Detection Settings"):
 ref_corners = detect_corners(ref, brake_th, speed_drop, window)
 cmp_corners = detect_corners(cmp, brake_th, speed_drop, window)
 
-if ref_corners.empty or cmp_corners.empty:
-    st.warning("No corners detected with current settings.")
-else:
+if not ref_corners.empty and not cmp_corners.empty:
     corner_df = match_corners(ref_corners, cmp_corners)
     st.dataframe(corner_df, use_container_width=True)
+else:
+    st.warning("No corners detected with current settings.")
 
 # -------------------------------------------------
-# SUMMARY
+# LAP SUMMARY
 # -------------------------------------------------
 st.markdown("---")
 st.subheader("📊 Lap Summary")
 
-c1, c2, c3 = st.columns(3)
-c1.metric("Avg Delta (s)", round(ref["delta_time"].mean(), 4))
-c2.metric("Max Loss (s)", round(ref["delta_time"].max(), 4))
-c3.metric("Corners Detected", len(ref_corners))
+lap_summary = {
+    "Average Delta (s)": round(ref["delta_time"].mean(), 4),
+    "Maximum Time Loss (s)": round(ref["delta_time"].max(), 4),
+    "Total Distance (m)": round(ref["distance"].max(), 1),
+    "Corners Detected": len(ref_corners),
+}
+
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Avg Delta (s)", lap_summary["Average Delta (s)"])
+c2.metric("Max Loss (s)", lap_summary["Maximum Time Loss (s)"])
+c3.metric("Distance (m)", lap_summary["Total Distance (m)"])
+c4.metric("Corners", lap_summary["Corners Detected"])
+
+# -------------------------------------------------
+# AI ENGINEER COACHING
+# -------------------------------------------------
+st.markdown("---")
+st.subheader("🧠 AI Race Engineer Coaching")
+
+enable_ai = st.toggle("Enable AI Engineer", value=True)
+
+if enable_ai:
+    with st.spinner("AI engineer reviewing telemetry..."):
+        ai_report = generate_ai_report(
+            lap_summary=lap_summary,
+            sector_table=sector_df.to_string(index=False),
+            corner_table=corner_df.to_string(index=False) if not ref_corners.empty else "No corners detected"
+        )
+
+    st.markdown(ai_report)
+
+else:
+    st.info("AI coaching disabled.")
