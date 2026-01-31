@@ -11,8 +11,8 @@ def ensure_distance(lap: pd.DataFrame) -> pd.DataFrame:
     if "distance" in lap.columns:
         return lap
 
-    speed = lap["speed"].copy()
-    if speed.mean() > 40:  # km/h → m/s
+    speed = lap["speed"]
+    if speed.mean() > 40:
         speed = speed / 3.6
 
     dt = lap["time"].diff().fillna(0.05)
@@ -34,7 +34,7 @@ def align_laps(ref: pd.DataFrame, cmp: pd.DataFrame):
 
 
 # -------------------------------------------------
-# DISTANCE-BASED DELTA
+# DELTA CALCULATION
 # -------------------------------------------------
 def compute_delta(ref: pd.DataFrame, cmp: pd.DataFrame) -> pd.DataFrame:
     cmp_time_interp = np.interp(
@@ -48,40 +48,51 @@ def compute_delta(ref: pd.DataFrame, cmp: pd.DataFrame) -> pd.DataFrame:
     return ref
 
 
+def interpolate_channel(ref: pd.DataFrame, cmp: pd.DataFrame, channel: str):
+    if channel not in cmp.columns:
+        return None
+
+    return np.interp(
+        ref["distance"],
+        cmp["distance"],
+        cmp[channel]
+    )
+
+
 # -------------------------------------------------
 # SECTOR DELTAS
 # -------------------------------------------------
 def compute_sector_deltas(ref: pd.DataFrame, cmp: pd.DataFrame, sectors: int = 3):
     total_distance = ref["distance"].max()
-    sector_len = total_distance / sectors
+    sector_length = total_distance / sectors
 
     rows = []
 
     for i in range(sectors):
-        start = i * sector_len
-        end = (i + 1) * sector_len
+        start = i * sector_length
+        end = (i + 1) * sector_length
 
-        r = ref[(ref["distance"] >= start) & (ref["distance"] < end)]
-        c = cmp[(cmp["distance"] >= start) & (cmp["distance"] < end)]
+        ref_s = ref[(ref["distance"] >= start) & (ref["distance"] < end)]
+        cmp_s = cmp[(cmp["distance"] >= start) & (cmp["distance"] < end)]
 
-        if r.empty or c.empty:
+        if ref_s.empty or cmp_s.empty:
             continue
+
+        ref_time = ref_s["time"].iloc[-1] - ref_s["time"].iloc[0]
+        cmp_time = cmp_s["time"].iloc[-1] - cmp_s["time"].iloc[0]
 
         rows.append({
             "Sector": f"S{i+1}",
-            "Ref Time (s)": round(r["time"].iloc[-1] - r["time"].iloc[0], 3),
-            "Cmp Time (s)": round(c["time"].iloc[-1] - c["time"].iloc[0], 3),
-            "Delta (s)": round(
-                (r["time"].iloc[-1] - r["time"].iloc[0]) -
-                (c["time"].iloc[-1] - c["time"].iloc[0]), 3
-            )
+            "Reference (s)": round(ref_time, 3),
+            "Comparison (s)": round(cmp_time, 3),
+            "Delta (s)": round(ref_time - cmp_time, 3)
         })
 
     return pd.DataFrame(rows)
 
 
 # -------------------------------------------------
-# CORNER DETECTION (BRAKE + MIN SPEED)
+# CORNER DETECTION
 # -------------------------------------------------
 def detect_corners(
     lap: pd.DataFrame,
@@ -89,6 +100,10 @@ def detect_corners(
     min_speed_drop: float = 8.0,
     window_m: float = 25.0
 ):
+    """
+    Detect corners using brake + local min speed.
+    Returns list of corner dicts.
+    """
     lap = lap.copy()
     corners = []
 
@@ -98,31 +113,38 @@ def detect_corners(
     brakes = lap["brake"].values if "brake" in lap.columns else np.zeros(len(lap))
 
     for i in range(2, len(lap) - 2):
-        braking = brakes[i] > brake_threshold
-        local_min = speeds[i] < speeds[i - 1] and speeds[i] < speeds[i + 1]
+        is_braking = brakes[i] > brake_threshold
+        is_min_speed = speeds[i] < speeds[i - 1] and speeds[i] < speeds[i + 1]
 
-        if not (braking and local_min):
+        if not (is_braking and is_min_speed):
             continue
 
-        start = distances[i] - window_m
-        end = distances[i] + window_m
+        start_dist = distances[i] - window_m
+        end_dist = distances[i] + window_m
 
-        seg = lap[(lap["distance"] >= start) & (lap["distance"] <= end)]
-        if seg.empty:
+        segment = lap[
+            (lap["distance"] >= start_dist) &
+            (lap["distance"] <= end_dist)
+        ]
+
+        if segment.empty:
             continue
 
-        entry = seg["speed"].iloc[0]
-        minimum = seg["speed"].min()
+        entry_speed = segment["speed"].iloc[0]
+        exit_speed = segment["speed"].iloc[-1]
+        min_speed = segment["speed"].min()
 
-        if entry - minimum < min_speed_drop:
+        if entry_speed - min_speed < min_speed_drop:
             continue
+
+        time_spent = segment["time"].iloc[-1] - segment["time"].iloc[0]
 
         corners.append({
-            "Apex Dist (m)": round(distances[i], 1),
-            "Entry Speed": round(entry, 2),
-            "Min Speed": round(minimum, 2),
-            "Exit Speed": round(seg["speed"].iloc[-1], 2),
-            "Corner Time (s)": round(seg["time"].iloc[-1] - seg["time"].iloc[0], 3)
+            "Apex Distance": round(distances[i], 1),
+            "Entry Speed": round(entry_speed, 2),
+            "Min Speed": round(min_speed, 2),
+            "Exit Speed": round(exit_speed, 2),
+            "Corner Time (s)": round(time_spent, 3)
         })
 
     return pd.DataFrame(corners)
