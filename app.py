@@ -21,8 +21,8 @@ st.markdown("""
 h1, h2, h3 { color: #E5E7EB; }
 .accent-blue { color: #3B82F6; }
 .accent-orange { color: #F97316; }
-.gain { color: #22C55E; font-weight: bold; }
-.loss { color: #EF4444; font-weight: bold; }
+.loss { background-color: #3F1D1D; }
+.gain { background-color: #052E16; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -32,7 +32,7 @@ h1, h2, h3 { color: #E5E7EB; }
 st.markdown("""
 <h1>🟦 <span class="accent-blue">AeroLap</span></h1>
 <p style="color:#9CA3AF;">
-Automatically identifies where lap time is gained and lost
+Exit-speed focused lap analysis — where lap time is really won
 </p>
 """, unsafe_allow_html=True)
 
@@ -44,10 +44,9 @@ st.sidebar.markdown("""
 <p style="color:#9CA3AF;">FueledFast Performance Tools</p>
 <hr style="border-color:#1F2937;">
 <ul>
-<li>📏 Distance Delta</li>
-<li>⏱ Sector Deltas</li>
 <li>📐 Corner Detection</li>
-<li>🔥 Time Gain/Loss Ranking</li>
+<li>🚀 Exit Speed Deltas</li>
+<li>🔥 Time Loss Ranking</li>
 </ul>
 """, unsafe_allow_html=True)
 
@@ -128,94 +127,84 @@ corners_b = detect_corners(lap_b)
 n = min(len(corners_a), len(corners_b))
 
 # =====================================================
-# CORNER TIME CALCULATION
+# EXIT SPEED CALCULATION
 # =====================================================
-WINDOW = 40
+EXIT_WINDOW = 20  # samples after apex
 
-def corner_time(df, idx):
-    s = max(0, idx - WINDOW)
-    e = min(len(df), idx + WINDOW)
-    dist = df["distance"].iloc[e-1] - df["distance"].iloc[s]
-    avg_speed = df["speed"].iloc[s:e].mean()
-    return dist / max(avg_speed, 0.1)
-
-corner_results = []
+exit_results = []
 
 for i in range(n):
-    t_a = corner_time(lap_a, corners_a[i])
-    t_b = corner_time(lap_b, corners_b[i])
-    delta = round(t_a - t_b, 3)
+    idx_a = corners_a[i]
+    idx_b = corners_b[i]
 
-    corner_results.append({
+    exit_a = lap_a["speed"].iloc[idx_a:idx_a+EXIT_WINDOW].mean()
+    exit_b = lap_b["speed"].iloc[idx_b:idx_b+EXIT_WINDOW].mean()
+
+    delta = round(exit_a - exit_b, 2)
+
+    exit_results.append({
         "Corner": i + 1,
-        "Lap A Time (est)": round(t_a, 3),
-        "Lap B Time (est)": round(t_b, 3),
-        "Delta (A-B)": delta,
-        "Result": "GAIN" if delta < 0 else "LOSS"
+        "Lap A Exit Speed": round(exit_a, 2),
+        "Lap B Exit Speed": round(exit_b, 2),
+        "Exit Speed Δ": delta,
+        "Result": "GAIN" if delta > 0 else "LOSS"
     })
 
-corner_df = pd.DataFrame(corner_results).sort_values("Delta (A-B)")
+exit_df = pd.DataFrame(exit_results).sort_values("Exit Speed Δ")
 
 # =====================================================
-# HIGHLIGHT TABLE
+# EXIT SPEED TABLE
 # =====================================================
-st.markdown("## 🔥 Corner Time Gain / Loss Ranking")
+st.markdown("## 🚀 Exit Speed Delta Ranking")
 
-def highlight(row):
-    if row["Delta (A-B)"] < 0:
-        return ["background-color: #052E16"] * len(row)
-    return ["background-color: #3F1D1D"] * len(row)
+def style_row(row):
+    if row["Exit Speed Δ"] < 0:
+        return ["background-color: #3F1D1D"] * len(row)
+    return ["background-color: #052E16"] * len(row)
 
 st.dataframe(
-    corner_df.style.apply(highlight, axis=1),
+    exit_df.style.apply(style_row, axis=1),
     use_container_width=True
 )
 
 # =====================================================
-# AUTO INSIGHTS
+# KEY INSIGHTS
 # =====================================================
-best = corner_df.iloc[0]
-worst = corner_df.iloc[-1]
+worst = exit_df.iloc[0]
+best = exit_df.iloc[-1]
 
-st.markdown("## 🧠 Automatic Insights")
+st.markdown("## 🧠 Exit Speed Insights")
 
 st.markdown(f"""
-- 🟢 **Biggest Gain:** Corner {best['Corner']} ({best['Delta (A-B)']}s)  
-- 🔴 **Biggest Loss:** Corner {worst['Corner']} (+{worst['Delta (A-B)']}s)  
-- 🎯 Focus coaching on **red corners first**
+- 🔴 **Worst Exit:** Corner {worst['Corner']} ({worst['Exit Speed Δ']} km/h)  
+- 🟢 **Best Exit:** Corner {best['Corner']} (+{best['Exit Speed Δ']} km/h)  
+- 🚀 Exit speed losses compound down the next straight
 """)
 
 # =====================================================
-# SELECT CORNER TO REVIEW
+# CORNER REVIEW
 # =====================================================
-st.markdown("## 📊 Review Specific Corner")
+st.markdown("## 📊 Review Exit Behavior")
 
 corner_choice = st.selectbox(
     "Select corner",
-    corner_df["Corner"].tolist()
+    exit_df["Corner"].tolist()
 )
 
 idx = corner_choice - 1
 
-def seg(df, i):
-    s = max(0, corners_a[i] - WINDOW)
-    e = min(len(df), corners_a[i] + WINDOW)
+def segment(df, apex):
+    s = max(0, apex - 30)
+    e = min(len(df), apex + 60)
     return df.iloc[s:e].reset_index(drop=True)
 
-seg_a = seg(lap_a, idx)
-seg_b = seg(lap_b, idx)
+seg_a = segment(lap_a, corners_a[idx])
+seg_b = segment(lap_b, corners_b[idx])
 
 st.line_chart(
     pd.DataFrame({
         f"{lap_a_name} Speed": seg_a["speed"],
         f"{lap_b_name} Speed": seg_b["speed"]
-    })
-)
-
-st.line_chart(
-    pd.DataFrame({
-        f"{lap_a_name} Brake": seg_a["brake"],
-        f"{lap_b_name} Brake": seg_b["brake"]
     })
 )
 
@@ -230,4 +219,4 @@ st.line_chart(
 # FOOTER
 # =====================================================
 st.markdown("---")
-st.caption("AeroLap • FueledFast • Identify Where Lap Time Is Won")
+st.caption("AeroLap • FueledFast • Exit Speed Wins Races")
