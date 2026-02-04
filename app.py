@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 # =====================================================
-# STYLING
+# STYLING — JET BLACK + BLUE / ORANGE
 # =====================================================
 st.markdown("""
 <style>
@@ -21,8 +21,12 @@ st.markdown("""
 h1, h2, h3 { color: #E5E7EB; }
 .accent-blue { color: #3B82F6; }
 .accent-orange { color: #F97316; }
-.loss { background-color: #3F1D1D; }
-.gain { background-color: #052E16; }
+.stButton button {
+    background-color: #3B82F6;
+    color: white;
+    border-radius: 8px;
+}
+.stButton button:hover { background-color: #2563EB; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -32,7 +36,7 @@ h1, h2, h3 { color: #E5E7EB; }
 st.markdown("""
 <h1>🟦 <span class="accent-blue">AeroLap</span></h1>
 <p style="color:#9CA3AF;">
-Exit-speed focused lap analysis — where lap time is really won
+Professional lap analysis — braking, throttle & corner performance
 </p>
 """, unsafe_allow_html=True)
 
@@ -44,23 +48,26 @@ st.sidebar.markdown("""
 <p style="color:#9CA3AF;">FueledFast Performance Tools</p>
 <hr style="border-color:#1F2937;">
 <ul>
+<li>📏 Distance Delta</li>
+<li>⏱ Sector Analysis</li>
 <li>📐 Corner Detection</li>
-<li>🚀 Exit Speed Deltas</li>
-<li>🔥 Time Loss Ranking</li>
+<li>🎛 Throttle & Brake Overlays</li>
 </ul>
 """, unsafe_allow_html=True)
 
 # =====================================================
 # FILE UPLOAD
 # =====================================================
+st.markdown("## 📤 Upload Lap Files")
+
 uploaded_files = st.file_uploader(
-    "Upload lap CSV files",
+    "Upload CSV lap files (same track)",
     type=["csv"],
     accept_multiple_files=True
 )
 
 if not uploaded_files or len(uploaded_files) < 2:
-    st.info("Upload at least two lap files.")
+    st.info("Upload **at least two lap CSV files**.")
     st.stop()
 
 laps = {f.name: pd.read_csv(f) for f in uploaded_files}
@@ -69,6 +76,8 @@ lap_names = list(laps.keys())
 # =====================================================
 # LAP SELECTION
 # =====================================================
+st.markdown("## 🔁 Select Laps")
+
 c1, c2 = st.columns(2)
 with c1:
     lap_a_name = st.selectbox("Lap A", lap_names, 0)
@@ -81,21 +90,58 @@ lap_b = laps[lap_b_name].copy()
 # =====================================================
 # COLUMN CHECK
 # =====================================================
-required = {"distance", "speed", "brake", "throttle"}
-for col in required:
+required_cols = {"distance", "speed", "brake", "throttle"}
+for col in required_cols:
     if col not in lap_a.columns or col not in lap_b.columns:
-        st.error(f"Missing required column: {col}")
+        st.error(f"Missing required column: `{col}`")
         st.stop()
 
 # =====================================================
-# ALIGN
+# ALIGN LAPS
 # =====================================================
 min_len = min(len(lap_a), len(lap_b))
 lap_a = lap_a.iloc[:min_len]
 lap_b = lap_b.iloc[:min_len]
 
 # =====================================================
-# CORNER DETECTION
+# DISTANCE DELTA
+# =====================================================
+st.markdown("## 📉 Distance Comparison")
+
+st.line_chart(
+    pd.DataFrame({
+        lap_a_name: lap_a["distance"],
+        lap_b_name: lap_b["distance"]
+    })
+)
+
+# =====================================================
+# SECTOR DELTAS
+# =====================================================
+st.markdown("## ⏱ Sector Deltas")
+
+SECTORS = 3
+sector_len = len(lap_a) // SECTORS
+sector_rows = []
+
+for i in range(SECTORS):
+    s = i * sector_len
+    e = (i + 1) * sector_len if i < SECTORS - 1 else len(lap_a)
+
+    a_dist = lap_a["distance"].iloc[e-1] - lap_a["distance"].iloc[s]
+    b_dist = lap_b["distance"].iloc[e-1] - lap_b["distance"].iloc[s]
+
+    sector_rows.append({
+        "Sector": f"S{i+1}",
+        "Lap A Distance": round(a_dist, 2),
+        "Lap B Distance": round(b_dist, 2),
+        "Delta": round(a_dist - b_dist, 2)
+    })
+
+st.dataframe(pd.DataFrame(sector_rows), use_container_width=True)
+
+# =====================================================
+# CORNER DETECTION (BRAKE + MIN SPEED)
 # =====================================================
 def detect_corners(df, brake_thresh=0.2):
     corners = []
@@ -124,89 +170,37 @@ def detect_corners(df, brake_thresh=0.2):
 
 corners_a = detect_corners(lap_a)
 corners_b = detect_corners(lap_b)
-n = min(len(corners_a), len(corners_b))
+
+num_corners = min(len(corners_a), len(corners_b))
 
 # =====================================================
-# EXIT SPEED CALCULATION
+# CORNER SELECTION
 # =====================================================
-EXIT_WINDOW = 20  # samples after apex
+st.markdown("## 📐 Corner Analysis")
 
-exit_results = []
+corner_ids = list(range(1, num_corners + 1))
+corner_choice = st.selectbox("Select Corner", corner_ids)
 
-for i in range(n):
-    idx_a = corners_a[i]
-    idx_b = corners_b[i]
-
-    exit_a = lap_a["speed"].iloc[idx_a:idx_a+EXIT_WINDOW].mean()
-    exit_b = lap_b["speed"].iloc[idx_b:idx_b+EXIT_WINDOW].mean()
-
-    delta = round(exit_a - exit_b, 2)
-
-    exit_results.append({
-        "Corner": i + 1,
-        "Lap A Exit Speed": round(exit_a, 2),
-        "Lap B Exit Speed": round(exit_b, 2),
-        "Exit Speed Δ": delta,
-        "Result": "GAIN" if delta > 0 else "LOSS"
-    })
-
-exit_df = pd.DataFrame(exit_results).sort_values("Exit Speed Δ")
+idx_a = corners_a[corner_choice - 1]
+idx_b = corners_b[corner_choice - 1]
 
 # =====================================================
-# EXIT SPEED TABLE
+# WINDOW AROUND CORNER
 # =====================================================
-st.markdown("## 🚀 Exit Speed Delta Ranking")
+WINDOW = 30  # samples before/after
 
-def style_row(row):
-    if row["Exit Speed Δ"] < 0:
-        return ["background-color: #3F1D1D"] * len(row)
-    return ["background-color: #052E16"] * len(row)
+def window(df, idx):
+    start = max(0, idx - WINDOW)
+    end = min(len(df), idx + WINDOW)
+    return df.iloc[start:end].reset_index(drop=True)
 
-st.dataframe(
-    exit_df.style.apply(style_row, axis=1),
-    use_container_width=True
-)
+seg_a = window(lap_a, idx_a)
+seg_b = window(lap_b, idx_b)
 
 # =====================================================
-# KEY INSIGHTS
+# THROTTLE OVERLAY
 # =====================================================
-worst = exit_df.iloc[0]
-best = exit_df.iloc[-1]
-
-st.markdown("## 🧠 Exit Speed Insights")
-
-st.markdown(f"""
-- 🔴 **Worst Exit:** Corner {worst['Corner']} ({worst['Exit Speed Δ']} km/h)  
-- 🟢 **Best Exit:** Corner {best['Corner']} (+{best['Exit Speed Δ']} km/h)  
-- 🚀 Exit speed losses compound down the next straight
-""")
-
-# =====================================================
-# CORNER REVIEW
-# =====================================================
-st.markdown("## 📊 Review Exit Behavior")
-
-corner_choice = st.selectbox(
-    "Select corner",
-    exit_df["Corner"].tolist()
-)
-
-idx = corner_choice - 1
-
-def segment(df, apex):
-    s = max(0, apex - 30)
-    e = min(len(df), apex + 60)
-    return df.iloc[s:e].reset_index(drop=True)
-
-seg_a = segment(lap_a, corners_a[idx])
-seg_b = segment(lap_b, corners_b[idx])
-
-st.line_chart(
-    pd.DataFrame({
-        f"{lap_a_name} Speed": seg_a["speed"],
-        f"{lap_b_name} Speed": seg_b["speed"]
-    })
-)
+st.markdown("### 🎛 Throttle Overlay")
 
 st.line_chart(
     pd.DataFrame({
@@ -216,7 +210,31 @@ st.line_chart(
 )
 
 # =====================================================
+# BRAKE OVERLAY
+# =====================================================
+st.markdown("### 🛑 Brake Overlay")
+
+st.line_chart(
+    pd.DataFrame({
+        f"{lap_a_name} Brake": seg_a["brake"],
+        f"{lap_b_name} Brake": seg_b["brake"]
+    })
+)
+
+# =====================================================
+# SPEED OVERLAY
+# =====================================================
+st.markdown("### 🏎 Speed Overlay")
+
+st.line_chart(
+    pd.DataFrame({
+        f"{lap_a_name} Speed": seg_a["speed"],
+        f"{lap_b_name} Speed": seg_b["speed"]
+    })
+)
+
+# =====================================================
 # FOOTER
 # =====================================================
 st.markdown("---")
-st.caption("AeroLap • FueledFast • Exit Speed Wins Races")
+st.caption("AeroLap • FueledFast • Corner-Level Telemetry Analysis")
