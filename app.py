@@ -1,97 +1,113 @@
 import streamlit as st
 import pandas as pd
 
-from utils.analysis import (
-    align_laps,
-    compute_delta,
-    interpolate_channel,
-    compute_sector_deltas,
-    detect_corners,
-    match_corners
+from utils.distance_delta import distance_based_delta
+
+# --------------------------------------------------
+# PAGE CONFIG
+# --------------------------------------------------
+st.set_page_config(
+    page_title="AeroLap – Lap Analysis",
+    layout="wide"
 )
 
-# -------------------------------------------------
-# PAGE SETUP
-# -------------------------------------------------
-st.set_page_config(page_title="FueledFast Telemetry", layout="wide")
+# --------------------------------------------------
+# SIDEBAR
+# --------------------------------------------------
+st.sidebar.title("🟦 AeroLap")
+st.sidebar.write("Professional lap comparison")
+st.sidebar.markdown("---")
+st.sidebar.write("Upload multiple laps and compare distance-based deltas.")
 
-st.sidebar.title("🔥 FueledFast Telemetry")
-st.sidebar.caption("Race Engineering Analysis")
+# --------------------------------------------------
+# HEADER
+# --------------------------------------------------
+st.title("🏎️ AeroLap – Distance-Based Lap Analysis")
+st.write("Upload **at least two lap CSV files** to compare like a race engineer.")
 
-st.title("🏎️ Telemetry Comparison")
-st.markdown("---")
-
-# -------------------------------------------------
+# --------------------------------------------------
 # FILE UPLOAD
-# -------------------------------------------------
-files = st.file_uploader(
-    "Upload telemetry CSV files",
+# --------------------------------------------------
+uploaded_files = st.file_uploader(
+    "Upload lap CSV files",
     type=["csv"],
     accept_multiple_files=True
 )
 
-if not files or len(files) < 2:
-    st.info("Upload at least two laps.")
+if not uploaded_files or len(uploaded_files) < 2:
+    st.info("Upload at least two laps to begin.")
     st.stop()
 
-laps = {f.name: pd.read_csv(f) for f in files}
-names = list(laps.keys())
+# --------------------------------------------------
+# LOAD LAPS
+# --------------------------------------------------
+laps = {}
+for f in uploaded_files:
+    laps[f.name] = pd.read_csv(f)
 
-# -------------------------------------------------
+lap_names = list(laps.keys())
+
+# --------------------------------------------------
 # LAP SELECTION
-# -------------------------------------------------
+# --------------------------------------------------
+st.markdown("## 🔁 Select Laps")
+
 col1, col2 = st.columns(2)
 with col1:
-    ref_name = st.selectbox("Reference Lap", names)
+    lap_a_name = st.selectbox("Reference Lap", lap_names, index=0)
 with col2:
-    cmp_name = st.selectbox("Comparison Lap", [n for n in names if n != ref_name])
+    lap_b_name = st.selectbox("Comparison Lap", lap_names, index=1)
 
-ref, cmp = align_laps(laps[ref_name], laps[cmp_name])
-ref = compute_delta(ref, cmp)
+lap_a = laps[lap_a_name]
+lap_b = laps[lap_b_name]
 
-# -------------------------------------------------
-# DELTA PLOT
-# -------------------------------------------------
-st.subheader("📉 Delta Time vs Distance")
-st.line_chart(ref.set_index("distance")["delta_time"])
+st.success(f"Comparing **{lap_a_name}** vs **{lap_b_name}**")
 
-# -------------------------------------------------
-# SECTOR DELTAS
-# -------------------------------------------------
-st.subheader("🧩 Sector Deltas")
-sectors = st.slider("Sectors", 2, 6, 3)
-st.dataframe(
-    compute_sector_deltas(ref, cmp, sectors),
-    use_container_width=True
+# --------------------------------------------------
+# DISTANCE-BASED DELTA
+# --------------------------------------------------
+delta_df = distance_based_delta(lap_a, lap_b)
+
+# --------------------------------------------------
+# RESULTS
+# --------------------------------------------------
+st.markdown("---")
+st.subheader("📉 Time Delta vs Distance")
+
+st.line_chart(
+    delta_df.set_index("distance")["delta_time"]
 )
 
-# -------------------------------------------------
-# CORNER ANALYSIS
-# -------------------------------------------------
+# --------------------------------------------------
+# BASIC STATS
+# --------------------------------------------------
+avg_delta = delta_df["delta_time"].mean()
+max_loss = delta_df["delta_time"].max()
+
+st.markdown("### Summary")
+st.write(f"**Average Delta:** {avg_delta:.3f} s")
+st.write(f"**Maximum Time Loss:** {max_loss:.3f} s")
+
+# --------------------------------------------------
+# TELEMETRY OVERLAYS
+# --------------------------------------------------
 st.markdown("---")
-st.subheader("📐 Corner Analysis")
+st.subheader("📊 Telemetry Overlays")
 
-with st.expander("Corner Detection Settings"):
-    brake_th = st.slider("Brake Threshold", 0.0, 1.0, 0.1)
-    speed_drop = st.slider("Minimum Speed Drop", 2.0, 30.0, 8.0)
-    window = st.slider("Corner Window (meters)", 10.0, 60.0, 25.0)
+def overlay(channel):
+    if channel in lap_a.columns and channel in lap_b.columns:
+        st.line_chart(pd.DataFrame({
+            lap_a_name: lap_a[channel],
+            lap_b_name: lap_b[channel]
+        }))
 
-ref_corners = detect_corners(ref, brake_th, speed_drop, window)
-cmp_corners = detect_corners(cmp, brake_th, speed_drop, window)
+overlay("speed")
+overlay("throttle")
+overlay("brake")
+overlay("steering")
 
-if ref_corners.empty or cmp_corners.empty:
-    st.warning("No corners detected with current settings.")
-else:
-    corner_df = match_corners(ref_corners, cmp_corners)
-    st.dataframe(corner_df, use_container_width=True)
-
-# -------------------------------------------------
-# SUMMARY
-# -------------------------------------------------
+# --------------------------------------------------
+# FOOTER
+# --------------------------------------------------
 st.markdown("---")
-st.subheader("📊 Lap Summary")
-
-c1, c2, c3 = st.columns(3)
-c1.metric("Avg Delta (s)", round(ref["delta_time"].mean(), 4))
-c2.metric("Max Loss (s)", round(ref["delta_time"].max(), 4))
-c3.metric("Corners Detected", len(ref_corners))
+st.caption("AeroLap by FueledFast • Built for serious drivers")
