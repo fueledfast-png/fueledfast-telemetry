@@ -3,7 +3,12 @@ import pandas as pd
 
 from utils.distance_delta import distance_based_delta
 from utils.sectors import compute_sector_deltas
-from utils.corners import analyze_corners, match_corner_deltas
+from utils.corners import (
+    analyze_corners,
+    match_corner_deltas,
+    detect_corners,
+    extract_corner_window
+)
 
 # --------------------------------------------------
 # PAGE CONFIG
@@ -101,25 +106,50 @@ st.dataframe(
 )
 
 # --------------------------------------------------
-# TELEMETRY OVERLAYS
+# CORNER OVERLAY SECTION
 # --------------------------------------------------
 st.markdown("---")
-st.subheader("📊 Telemetry Overlays")
+st.subheader("🧩 Corner Telemetry Overlay")
 
-def overlay(channel):
-    if channel in lap_a.columns and channel in lap_b.columns:
-        st.line_chart(pd.DataFrame({
-            lap_a_name: lap_a[channel],
-            lap_b_name: lap_b[channel]
-        }))
+corner_indices_a = detect_corners(lap_a)
+corner_indices_b = detect_corners(lap_b)
 
-overlay("speed")
-overlay("throttle")
-overlay("brake")
-overlay("steering")
+max_corners = min(len(corner_indices_a), len(corner_indices_b))
+
+if max_corners == 0:
+    st.warning("No corners detected in one or both laps.")
+else:
+    selected_corner = st.selectbox(
+        "Select Corner",
+        list(range(1, max_corners + 1))
+    )
+
+    idx = selected_corner - 1
+
+    window_a = extract_corner_window(lap_a, corner_indices_a[idx])
+    window_b = extract_corner_window(lap_b, corner_indices_b[idx])
+
+    def overlay_channel(channel, title):
+        if channel in window_a.columns and channel in window_b.columns:
+            st.markdown(f"**{title}**")
+            st.line_chart(pd.DataFrame({
+                lap_a_name: window_a[channel],
+                lap_b_name: window_b[channel]
+            }))
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        overlay_channel("speed", "Speed")
+
+    with col2:
+        overlay_channel("throttle", "Throttle")
+
+    overlay_channel("brake", "Brake")
 
 # --------------------------------------------------
 # FOOTER
 # --------------------------------------------------
 st.markdown("---")
 st.caption("AeroLap by FueledFast • Built like a race engineering tool")
+
