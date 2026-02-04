@@ -1,34 +1,24 @@
 import pandas as pd
-import numpy as np
 
-def compute_sector_deltas(delta_df, num_sectors=3):
-    """
-    Split distance-based delta into equal-distance sectors
-    and compute time loss per sector.
-    """
-    max_dist = delta_df["distance"].max()
-    sector_edges = np.linspace(0, max_dist, num_sectors + 1)
+def sector_deltas(lap_a, lap_b, sectors=3):
+    total = min(lap_a["distance"].max(), lap_b["distance"].max())
+    sector_len = total / sectors
 
     rows = []
 
-    for i in range(num_sectors):
-        start = sector_edges[i]
-        end = sector_edges[i + 1]
+    for i in range(sectors):
+        start = i * sector_len
+        end = (i + 1) * sector_len
 
-        sector = delta_df[
-            (delta_df["distance"] >= start) &
-            (delta_df["distance"] < end)
-        ]
+        a = lap_a[(lap_a["distance"] >= start) & (lap_a["distance"] < end)]
+        b = lap_b[(lap_b["distance"] >= start) & (lap_b["distance"] < end)]
 
-        if sector.empty:
+        if len(a) == 0 or len(b) == 0:
             continue
-
-        sector_time = sector["delta_time"].iloc[-1] - sector["delta_time"].iloc[0]
 
         rows.append({
             "Sector": f"S{i+1}",
-            "Distance Range (m)": f"{start:.0f} – {end:.0f}",
-            "Time Delta (s)": round(sector_time, 3)
+            "Delta (s)": round(a["time"].iloc[-1] - b["time"].iloc[-1], 3)
         })
 
     return pd.DataFrame(rows)
