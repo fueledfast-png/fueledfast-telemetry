@@ -1,81 +1,35 @@
 import pandas as pd
-import numpy as np
 
-# --------------------------------------------------
-# CORNER DETECTION (NO SCIPY)
-# --------------------------------------------------
-def detect_corners(lap_df, speed_col="speed"):
-    """
-    Detect corners using local minimum speed logic.
-    Returns indices of corner apexes.
-    """
-    speed = lap_df[speed_col].values
-    corner_indices = []
+def detect_corners(df, brake_threshold=0.2):
+    corners = []
+    braking = df["brake"] > brake_threshold
+    start = None
 
-    for i in range(1, len(speed) - 1):
-        if speed[i] < speed[i - 1] and speed[i] < speed[i + 1]:
-            corner_indices.append(i)
+    for i in range(len(df)):
+        if braking.iloc[i] and start is None:
+            start = i
 
-    return corner_indices
+        elif not braking.iloc[i] and start is not None:
+            segment = df.iloc[start:i]
+            min_idx = segment["speed"].idxmin()
 
+            corners.append({
+                "corner_id": len(corners) + 1,
+                "start": start,
+                "end": i,
+                "min_speed": segment.loc[min_idx, "speed"]
+            })
+            start = None
 
-# --------------------------------------------------
-# CORNER METRICS
-# --------------------------------------------------
-def analyze_corners(lap_df):
-    """
-    Extract basic corner metrics for each detected corner.
-    """
-    corners = detect_corners(lap_df)
-    results = []
+    return pd.DataFrame(corners)
 
-    for idx in corners:
-        entry = lap_df.iloc[max(0, idx - 10):idx]
-        exit = lap_df.iloc[idx:min(len(lap_df), idx + 10)]
+def match_corner_deltas(c1, c2):
+    rows = []
 
-        results.append({
-            "corner_idx": idx,
-            "min_speed": lap_df.iloc[idx]["speed"],
-            "entry_speed": entry["speed"].mean(),
-            "exit_speed": exit["speed"].mean(),
-        })
-
-    return pd.DataFrame(results)
-
-
-# --------------------------------------------------
-# CORNER DELTA MATCHING
-# --------------------------------------------------
-def match_corner_deltas(corners_a, corners_b):
-    """
-    Compare corner metrics between two laps.
-    """
-    min_len = min(len(corners_a), len(corners_b))
-
-    data = []
-    for i in range(min_len):
-        time_delta = (
-            corners_b.iloc[i]["min_speed"]
-            - corners_a.iloc[i]["min_speed"]
-        )
-
-        data.append({
+    for i in range(min(len(c1), len(c2))):
+        rows.append({
             "Corner": i + 1,
-            "Min Speed Δ": round(time_delta, 2),
-            "Time Δ (s)": round(time_delta * -0.02, 3)  # proxy
+            "Min Speed Δ": round(c1.iloc[i]["min_speed"] - c2.iloc[i]["min_speed"], 2)
         })
 
-    return pd.DataFrame(data)
-
-
-# --------------------------------------------------
-# CORNER WINDOW EXTRACTION
-# --------------------------------------------------
-def extract_corner_window(lap_df, corner_idx,
-                          window_before=20, window_after=40):
-    """
-    Returns telemetry slice around a corner.
-    """
-    start = max(0, corner_idx - window_before)
-    end = min(len(lap_df), corner_idx + window_after)
-    return lap_df.iloc[start:end].reset_index(drop=True)
+    return pd.DataFrame(rows)
