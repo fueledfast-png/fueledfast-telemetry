@@ -1,91 +1,81 @@
-import numpy as np
 import pandas as pd
-from scipy.signal import find_peaks
+import numpy as np
 
-def detect_corners(lap_df, speed_col="speed", time_col="time",
-                   min_prominence=1.5, min_distance_s=0.5):
+# --------------------------------------------------
+# CORNER DETECTION (NO SCIPY)
+# --------------------------------------------------
+def detect_corners(lap_df, speed_col="speed"):
     """
-    Detect corners by finding local minima in speed.
-    Returns list of corner indices.
+    Detect corners using local minimum speed logic.
+    Returns indices of corner apexes.
     """
-    speeds = lap_df[speed_col].values
-    times = lap_df[time_col].values
+    speed = lap_df[speed_col].values
+    corner_indices = []
 
-    if len(times) < 2:
-        return []
+    for i in range(1, len(speed) - 1):
+        if speed[i] < speed[i - 1] and speed[i] < speed[i + 1]:
+            corner_indices.append(i)
 
-    # invert speed to find minima
-    inverted = -speeds
-
-    dt = np.median(np.diff(times))
-    min_samples = max(1, int(min_distance_s / (dt if dt > 0 else 0.05)))
-
-    peaks, _ = find_peaks(
-        inverted,
-        prominence=min_prominence,
-        distance=min_samples
-    )
-
-    return peaks.tolist()
+    return corner_indices
 
 
-def corner_stats(lap_df, corner_idx,
-                 window_before=20, window_after=40,
-                 speed_col="speed", time_col="time"):
-    """
-    Compute entry / min / exit speed and time spent for a corner.
-    """
-    start = max(0, corner_idx - window_before)
-    end = min(len(lap_df) - 1, corner_idx + window_after)
-
-    segment = lap_df.iloc[start:end]
-
-    entry_speed = segment[speed_col].iloc[:5].mean()
-    exit_speed = segment[speed_col].iloc[-5:].mean()
-    min_speed = segment[speed_col].min()
-    time_spent = segment[time_col].iloc[-1] - segment[time_col].iloc[0]
-
-    return {
-        "entry_speed": round(entry_speed, 2),
-        "min_speed": round(min_speed, 2),
-        "exit_speed": round(exit_speed, 2),
-        "time_spent": round(time_spent, 3)
-    }
-
-
+# --------------------------------------------------
+# CORNER METRICS
+# --------------------------------------------------
 def analyze_corners(lap_df):
     """
-    Full corner analysis for one lap.
-    Returns DataFrame of corner stats.
+    Extract basic corner metrics for each detected corner.
     """
-    corner_indices = detect_corners(lap_df)
+    corners = detect_corners(lap_df)
+    results = []
 
-    rows = []
-    for i, idx in enumerate(corner_indices):
-        stats = corner_stats(lap_df, idx)
-        stats["Corner"] = i + 1
-        rows.append(stats)
+    for idx in corners:
+        entry = lap_df.iloc[max(0, idx - 10):idx]
+        exit = lap_df.iloc[idx:min(len(lap_df), idx + 10)]
 
-    return pd.DataFrame(rows)
-
-
-def match_corner_deltas(corners_a, corners_b):
-    """
-    Match corners by order and compute deltas.
-    """
-    n = min(len(corners_a), len(corners_b))
-    rows = []
-
-    for i in range(n):
-        a = corners_a.iloc[i]
-        b = corners_b.iloc[i]
-
-        rows.append({
-            "Corner": int(a["Corner"]),
-            "Entry Δ": round(a["entry_speed"] - b["entry_speed"], 2),
-            "Min Speed Δ": round(a["min_speed"] - b["min_speed"], 2),
-            "Exit Δ": round(a["exit_speed"] - b["exit_speed"], 2),
-            "Time Δ (s)": round(a["time_spent"] - b["time_spent"], 3)
+        results.append({
+            "corner_idx": idx,
+            "min_speed": lap_df.iloc[idx]["speed"],
+            "entry_speed": entry["speed"].mean(),
+            "exit_speed": exit["speed"].mean(),
         })
 
-    return pd.DataFrame(rows)
+    return pd.DataFrame(results)
+
+
+# --------------------------------------------------
+# CORNER DELTA MATCHING
+# --------------------------------------------------
+def match_corner_deltas(corners_a, corners_b):
+    """
+    Compare corner metrics between two laps.
+    """
+    min_len = min(len(corners_a), len(corners_b))
+
+    data = []
+    for i in range(min_len):
+        time_delta = (
+            corners_b.iloc[i]["min_speed"]
+            - corners_a.iloc[i]["min_speed"]
+        )
+
+        data.append({
+            "Corner": i + 1,
+            "Min Speed Δ": round(time_delta, 2),
+            "Time Δ (s)": round(time_delta * -0.02, 3)  # proxy
+        })
+
+    return pd.DataFrame(data)
+
+
+# --------------------------------------------------
+# CORNER WINDOW EXTRACTION
+# --------------------------------------------------
+def extract_corner_window(lap_df, corner_idx,
+                          window_before=20, window_after=40):
+    """
+    Returns telemetry slice around a corner.
+    """
+    start = max(0, corner_idx - window_before)
+    end = min(len(lap_df), corner_idx + window_after)
+    return lap_df.iloc[start:end].reset_index(drop=True)
