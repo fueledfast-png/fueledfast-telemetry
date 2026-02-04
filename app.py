@@ -3,6 +3,7 @@ import pandas as pd
 
 from utils.distance_delta import distance_based_delta
 from utils.sectors import compute_sector_deltas
+from utils.corners import analyze_corners, match_corner_deltas
 
 # --------------------------------------------------
 # PAGE CONFIG
@@ -16,15 +17,15 @@ st.set_page_config(
 # SIDEBAR
 # --------------------------------------------------
 st.sidebar.title("🟦 AeroLap")
-st.sidebar.write("Professional lap comparison")
+st.sidebar.write("Engineer-grade lap analysis")
 st.sidebar.markdown("---")
-st.sidebar.write("Distance-based deltas • Sector analysis")
+st.sidebar.write("Distance • Sectors • Corners")
 
 # --------------------------------------------------
 # HEADER
 # --------------------------------------------------
-st.title("🏎️ AeroLap – Distance-Based Lap Analysis")
-st.write("Upload **at least two lap CSV files** to compare like a race engineer.")
+st.title("🏎️ AeroLap – Professional Lap Comparison")
+st.write("Upload **at least two lap CSV files** to compare performance.")
 
 # --------------------------------------------------
 # FILE UPLOAD
@@ -42,10 +43,7 @@ if not uploaded_files or len(uploaded_files) < 2:
 # --------------------------------------------------
 # LOAD LAPS
 # --------------------------------------------------
-laps = {}
-for f in uploaded_files:
-    laps[f.name] = pd.read_csv(f)
-
+laps = {f.name: pd.read_csv(f) for f in uploaded_files}
 lap_names = list(laps.keys())
 
 # --------------------------------------------------
@@ -65,46 +63,42 @@ lap_b = laps[lap_b_name]
 st.success(f"Comparing **{lap_a_name}** vs **{lap_b_name}**")
 
 # --------------------------------------------------
-# DISTANCE-BASED DELTA
+# DISTANCE DELTA
 # --------------------------------------------------
 delta_df = distance_based_delta(lap_a, lap_b)
 
 # --------------------------------------------------
-# SECTOR DELTAS
+# SECTORS
 # --------------------------------------------------
 st.markdown("---")
 st.subheader("⏱ Sector Time Deltas")
 
-num_sectors = st.selectbox(
-    "Number of sectors",
-    options=[3, 4, 5],
-    index=0
-)
-
+num_sectors = st.selectbox("Number of sectors", [3, 4, 5])
 sector_df = compute_sector_deltas(delta_df, num_sectors)
-
-st.dataframe(
-    sector_df,
-    use_container_width=True
-)
+st.dataframe(sector_df, use_container_width=True)
 
 # --------------------------------------------------
 # DELTA PLOT
 # --------------------------------------------------
 st.markdown("---")
 st.subheader("📉 Time Delta vs Distance")
+st.line_chart(delta_df.set_index("distance")["delta_time"])
 
-st.line_chart(
-    delta_df.set_index("distance")["delta_time"]
+# --------------------------------------------------
+# CORNER ANALYSIS
+# --------------------------------------------------
+st.markdown("---")
+st.subheader("📐 Corner Time Loss Analysis")
+
+corners_a = analyze_corners(lap_a)
+corners_b = analyze_corners(lap_b)
+
+corner_deltas = match_corner_deltas(corners_a, corners_b)
+
+st.dataframe(
+    corner_deltas.sort_values("Time Δ (s)", ascending=False),
+    use_container_width=True
 )
-
-# --------------------------------------------------
-# SUMMARY
-# --------------------------------------------------
-st.markdown("### Summary")
-
-st.write(f"**Total Delta:** {delta_df['delta_time'].iloc[-1]:.3f} s")
-st.write(f"**Average Delta:** {delta_df['delta_time'].mean():.3f} s")
 
 # --------------------------------------------------
 # TELEMETRY OVERLAYS
@@ -128,4 +122,4 @@ overlay("steering")
 # FOOTER
 # --------------------------------------------------
 st.markdown("---")
-st.caption("AeroLap by FueledFast • Engineer-grade lap analysis")
+st.caption("AeroLap by FueledFast • Built like a race engineering tool")
